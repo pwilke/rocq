@@ -114,23 +114,36 @@ if (sp - num_args < rocq_stack_threshold) {                                     
 #define Setup_for_caml_call { *--sp = rocq_env; rocq_sp = sp; }
 #define Restore_after_caml_call rocq_env = *sp++;
 
+/* Beware: Alloc_small can only invoked for allocations smaller than
+   Max_young_wosize, which is usually 256. For larger allocations,
+   caml_alloc_shr needs to be used instead, and the block needs to be filled
+   using caml_initialize. Note that these two functions never trigger a GC,
+   so calling Setup_for_gc is not needed. This is now enforced by
+   Rocq_check_alloc_size. */
+#define Rocq_check_alloc_size(wosize)                                   \
+  do {                                                                  \
+    if ((mlsize_t)(wosize) > Max_young_wosize)                          \
+      caml_fatal_error("Rocq VM: Rocq_alloc_small size %" ARCH_INTNAT_PRINTF_FORMAT \
+                       "u exceeds Max_young_wosize %u",                 \
+                       (uintnat)(wosize), (unsigned)Max_young_wosize);  \
+  } while (0)
+
 #if OCAML_VERSION >= 50000
 #define Enter_gc(dom_st, wosize) do {        \
     Setup_for_gc;                            \
     Alloc_small_enter_GC(dom_st, wosize);    \
     Restore_after_gc;                        \
   } while (0)
-#define Rocq_alloc_small(result, wosize, tag) Alloc_small(result, wosize, tag, Enter_gc)
+#define Rocq_alloc_small(result, wosize, tag) do {      \
+    Rocq_check_alloc_size(wosize);                      \
+    Alloc_small(result, wosize, tag, Enter_gc);         \
+  } while (0)
 #else
-#define Rocq_alloc_small(result, wosize, tag) Alloc_small(result, wosize, tag)
+#define Rocq_alloc_small(result, wosize, tag) do {      \
+    Rocq_check_alloc_size(wosize);                      \
+    Alloc_small(result, wosize, tag);                   \
+  } while (0)
 #endif
-
-/* Beware: Alloc_small can only invoked for allocations smaller than
-   Max_young_wosize, which is usually 256. For larger allocations,
-   caml_alloc_shr needs to be used instead, and the block needs to be filled
-   using caml_initialize. Note that these two functions never trigger a GC,
-   so calling Setup_for_gc is not needed.
-*/
 
 /* If there is an asynchronous exception, we reset the vm */
 #define Handle_potential_exception(res) \
